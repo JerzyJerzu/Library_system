@@ -82,8 +82,11 @@ class MenuDialogSingleton:
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
+            cls._instance._initialize(*args, **kwargs)
         return cls._instance
 
+    def _initialize(self):
+        self.db_manager = DatabaseManagerSingleton()       
     def show_menu(self):
         print("Menu:")
         print("1. Add a book")
@@ -104,8 +107,11 @@ class MenuDialogSingleton:
             self.show_menu()
 
     def add_book_dialog(self):
-        self.dialog.show_dialog("Add a book dialog")
-        # Add code to handle adding a book
+        title = input("Enter the title of the book: ")
+        author = input("Enter the author of the book: ")
+        self.db_manager.add_book(title, author)
+        print("Book added successfully!")
+        self.show_menu()
 
     def add_user_dialog(self):
         self.dialog.show_dialog("Add a new user dialog")
@@ -122,14 +128,13 @@ def main():
     keyspace_name = 'library_project'
 
     db_manager = DatabaseManagerSingleton(contact_points, port, keyspace_name)
-    menu_dialog = MenuDialog()
+    menu_dialog = MenuDialogSingleton()
     menu_dialog.show_menu()
-    dialog.show_dialog('Done')
 
 if __name__ == "__main__":
     main()
     
-
+"""
 def main():
     print('hello!')
     contact_points = ['127.0.1.1', '127.0.1.2', '127.0.1.3']
@@ -144,6 +149,4 @@ def main():
     print(lotr_books[1].book_id)
     db_manager.get_replicas('books', lotr_books[1].book_id)
     dialog.show_dialog('Done')
-
-if __name__ == "__main__":
-    main()
+"""
