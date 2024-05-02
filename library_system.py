@@ -48,6 +48,7 @@ class DatabaseManagerSingleton:
         print('created users')
         self.session.execute(
             # POTENTIAL DANGER primary key
+            # ADD due date
             """
             CREATE TABLE IF NOT EXISTS reservations (
                 user_id uuid,
@@ -75,9 +76,44 @@ class DatabaseManagerSingleton:
         rows = self.session.execute(query, (author,))
         return rows._current_rows
 
-    def check_data_distribution(self):
-        for host in self.cluster.metadata.all_hosts():
-            print('Address: %s, Rack: %s, Datacenter: %s, Status: %s' % (host.address, host.rack, host.datacenter, host.is_up))
+class MenuDialogSingleton:
+    _instance = None
+
+    def __new__(cls, *args, **kwargs):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+    def show_menu(self):
+        print("Menu:")
+        print("1. Add a book")
+        print("2. Add a new user")
+        print("3. Search for a book")
+        choice = input("Enter your choice: ")
+        self.process_choice(choice)
+
+    def process_choice(self, choice):
+        if choice == "1":
+            self.add_book_dialog()
+        elif choice == "2":
+            self.add_user_dialog()
+        elif choice == "3":
+            self.search_book_dialog()
+        else:
+            self.dialog.show_dialog("Invalid choice. Please try again.")
+            self.show_menu()
+
+    def add_book_dialog(self):
+        self.dialog.show_dialog("Add a book dialog")
+        # Add code to handle adding a book
+
+    def add_user_dialog(self):
+        self.dialog.show_dialog("Add a new user dialog")
+        # Add code to handle adding a new user
+
+    def search_book_dialog(self):
+        self.dialog.show_dialog("Search for a book dialog")
+        # Add code to handle searching for a book
 
 def main():
     print('hello!')
@@ -85,17 +121,29 @@ def main():
     port = 9042
     keyspace_name = 'library_project'
 
-    db_manager = DatabaseManagerSingleton(contact_points,port,keyspace_name)
+    db_manager = DatabaseManagerSingleton(contact_points, port, keyspace_name)
+    menu_dialog = MenuDialog()
+    menu_dialog.show_menu()
+    dialog.show_dialog('Done')
 
-    #cluster = Cluster(contact_points, port)
-    #session=cluster.connect()
-    db_manager.check_data_distribution()
+if __name__ == "__main__":
+    main()
+    
 
-    db_manager.add_book('The Great Gatsby', 'F. Scott Fitzgerald')
-    db_manager.add_book('LOTR', 'Tolkien')
-    db_manager.add_book('Metro', 'Glukhovsky')
-    print('added books')
-    print(db_manager.get_books_by_title('LOTR'))
-    print('done')
+def main():
+    print('hello!')
+    contact_points = ['127.0.1.1', '127.0.1.2', '127.0.1.3']
+    port = 9042
+    keyspace_name = 'library_project'
+
+    db_manager = DatabaseManagerSingleton(contact_points, port, keyspace_name)
+    dialog = DialogSingleton()
+
+    lotr_books = db_manager.get_books_by_title('LOTR')
+    print(lotr_books)
+    print(lotr_books[1].book_id)
+    db_manager.get_replicas('books', lotr_books[1].book_id)
+    dialog.show_dialog('Done')
+
 if __name__ == "__main__":
     main()
