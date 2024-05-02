@@ -3,6 +3,7 @@ import random
 import time
 from cassandra.cluster import Cluster
 from cassandra.metadata import KeyspaceMetadata
+from cassandra.query import SimpleStatement, ConsistencyLevel
 
 class DatabaseManagerSingleton:
     _instance = None
@@ -49,13 +50,34 @@ class DatabaseManagerSingleton:
             # POTENTIAL DANGER primary key
             """
             CREATE TABLE IF NOT EXISTS reservations (
-                user_id text,
-                book_id text,
+                user_id uuid,
+                book_id uuid,
                 PRIMARY KEY ((user_id, book_id)),
             )
             """
         )
         print('created reservations')
+    
+    def add_book(self, title, author):
+        query = SimpleStatement("""
+            INSERT INTO books (book_id, title, author, available) 
+            VALUES (uuid(), %s, %s, true)
+        """, consistency_level=ConsistencyLevel.TWO)
+        self.session.execute(query, (title, author))
+
+    def get_books_by_title(self, title):
+        query = SimpleStatement("SELECT * FROM books WHERE title = %s ALLOW FILTERING", consistency_level=ConsistencyLevel.ONE)
+        rows = self.session.execute(query, (title,))
+        return rows._current_rows
+
+    def get_books_by_author(self, author):
+        query = SimpleStatement("SELECT * FROM books WHERE author = %s ALLOW FILTERING", consistency_level=ConsistencyLevel.ONE)
+        rows = self.session.execute(query, (author,))
+        return rows._current_rows
+
+    def check_data_distribution(self):
+        for host in self.cluster.metadata.all_hosts():
+            print('Address: %s, Rack: %s, Datacenter: %s, Status: %s' % (host.address, host.rack, host.datacenter, host.is_up))
 
 def main():
     print('hello!')
@@ -67,7 +89,13 @@ def main():
 
     #cluster = Cluster(contact_points, port)
     #session=cluster.connect()
+    db_manager.check_data_distribution()
 
+    db_manager.add_book('The Great Gatsby', 'F. Scott Fitzgerald')
+    db_manager.add_book('LOTR', 'Tolkien')
+    db_manager.add_book('Metro', 'Glukhovsky')
+    print('added books')
+    print(db_manager.get_books_by_title('LOTR'))
     print('done')
 if __name__ == "__main__":
     main()
