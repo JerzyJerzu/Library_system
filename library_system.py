@@ -92,6 +92,7 @@ class MenuDialogSingleton:
         print("1. Add a book")
         print("2. Add a new user")
         print("3. Search for a book")
+        print("4. Exit")
         choice = input("Enter your choice: ")
         self.process_choice(choice)
 
@@ -102,8 +103,11 @@ class MenuDialogSingleton:
             self.add_user_dialog()
         elif choice == "3":
             self.search_book_dialog()
+        elif choice == "4":
+            print("Exiting program...")
+            return
         else:
-            self.dialog.show_dialog("Invalid choice. Please try again.")
+            print("Invalid choice. Please try again.")
             self.show_menu()
 
     def add_book_dialog(self):
@@ -114,12 +118,49 @@ class MenuDialogSingleton:
         self.show_menu()
 
     def add_user_dialog(self):
-        self.dialog.show_dialog("Add a new user dialog")
-        # Add code to handle adding a new user
+        return
+        # Add code
 
     def search_book_dialog(self):
-        self.dialog.show_dialog("Search for a book dialog")
-        # Add code to handle searching for a book
+        search_option = input("Search by (1) Title or (2) Author: ")
+        if search_option == "1":
+            search_term = input("Enter the title of the book: ")
+            books = self.db_manager.get_books_by_title(search_term)
+        elif search_option == "2":
+            search_term = input("Enter the author of the book: ")
+            books = self.db_manager.get_books_by_author(search_term)
+        else:
+            print("Invalid search option. Please try again.")
+            self.search_book_dialog()
+            return
+        
+        if len(books) > 5:
+            print(f"Matching books: {len(books)} books found.")
+            proceed = input("Do you want to proceed? (Y/N): ")
+            if proceed.upper() != "Y":
+                self.show_menu()
+                return
+        
+        if books:
+            print("Matching books:")
+            for i, book in enumerate(books):
+                print(f"{i+1}. {book.title} by {book.author} [{'Available' if book.available else 'Not available'}], ID: {book.book_id}")
+
+            book_index = input("Enter the number of the book you wish to reserve: ")
+            book_index = int(book_index)
+            if book_index < 1 or book_index > len(books):
+                print("Invalid book number. Please try again.")
+                self.search_book_dialog()
+                return
+            book_id = books[book_index-1].book_id
+            print(book_id)
+        else:
+            print("No matching books found.")
+        self.show_menu()
+    
+    def view_book_details(self, book_id):
+        return
+        # Add code
 
 def main():
     print('hello!')
