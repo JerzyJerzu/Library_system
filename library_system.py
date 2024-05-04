@@ -7,7 +7,6 @@ from cassandra.query import SimpleStatement, ConsistencyLevel
 
 class DatabaseManagerSingleton:
     _instance = None
-
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
@@ -22,8 +21,12 @@ class DatabaseManagerSingleton:
         self.session.set_keyspace(keyspace_name)
         print('keyspace set')
         self._create_tables_if_not_exist()
-
+        
     def _create_tables_if_not_exist(self):
+        #self.session.execute("DROP TABLE IF EXISTS books")
+        #self.session.execute("DROP TABLE IF EXISTS users")
+        #self.session.execute("DROP TABLE IF EXISTS reservations")
+
         self.session.execute(
             """
             CREATE TABLE IF NOT EXISTS books (
@@ -39,9 +42,8 @@ class DatabaseManagerSingleton:
         self.session.execute(
             """
             CREATE TABLE IF NOT EXISTS users (
-                user_id uuid,
                 username text,
-                PRIMARY KEY (user_id, username)
+                PRIMARY KEY (username)
             )
             """
         )
@@ -51,9 +53,9 @@ class DatabaseManagerSingleton:
             # ADD due date
             """
             CREATE TABLE IF NOT EXISTS reservations (
-                user_id uuid,
+                username text,
                 book_id uuid,
-                PRIMARY KEY ((user_id, book_id)),
+                PRIMARY KEY ((username, book_id)),
             )
             """
         )
@@ -75,6 +77,23 @@ class DatabaseManagerSingleton:
         query = SimpleStatement("SELECT * FROM books WHERE author = %s ALLOW FILTERING", consistency_level=ConsistencyLevel.ONE)
         rows = self.session.execute(query, (author,))
         return rows._current_rows
+
+    def add_user(self, username):
+        if self.check_username_exists(username):
+            print("Username already exists. Please choose a different username.")
+            return
+        query = SimpleStatement("""
+            INSERT INTO users (username) 
+            VALUES (%s)
+        """, consistency_level=ConsistencyLevel.TWO)
+        self.session.execute(query, (username,))
+        print("User added successfully!")
+    
+    # which consisteny level to use?
+    def check_username_exists(self, username):
+        query = SimpleStatement("SELECT * FROM users WHERE username = %s", consistency_level=ConsistencyLevel.ONE)
+        rows = self.session.execute(query, (username,))
+        return len(rows._current_rows) > 0
 
 class MenuDialogSingleton:
     _instance = None
@@ -118,8 +137,9 @@ class MenuDialogSingleton:
         self.show_menu()
 
     def add_user_dialog(self):
-        return
-        # Add code
+        username = input("Enter the username: ")
+        self.db_manager.add_user(username)
+        self.show_menu()
 
     def search_book_dialog(self):
         search_option = input("Search by (1) Title or (2) Author: ")
