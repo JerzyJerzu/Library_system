@@ -90,11 +90,10 @@ class DatabaseManagerSingleton:
             return
         # Even if the user does not exist in the table, the UPDATE statement will create a new row with the specified username and set the reserved_books counter to 0.
         query = SimpleStatement("""
-            UPDATE user_reservations
-            SET reserved_books = 0
+            UPDATE reservations
             WHERE username = %s
         """, consistency_level=ConsistencyLevel.TWO)
-        self.session.execute(query, username2)
+        self.session.execute(query, (username,))
         print("User added successfully!")
     
     # which consisteny level to use?
