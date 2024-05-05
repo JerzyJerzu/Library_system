@@ -155,7 +155,7 @@ class DatabaseManagerSingleton:
                 WHERE username = %s ALLOW FILTERING
         """, consistency_level=ConsistencyLevel.ONE)
         rows = self.session.execute(query, (username,))
-        return self.get_book_by_id(rows._current_rows)
+        return self.get_book_by_id(rows.one().book_id)
     # POTENTIAL CONCURRENT ISSUE
     def increment_user_reserved_books(self, username):
         query = SimpleStatement("UPDATE users SET reserved_books = reserved_books + 1 WHERE username = %s", consistency_level=ConsistencyLevel.TWO)
