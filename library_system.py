@@ -22,8 +22,8 @@ class DatabaseManagerSingleton:
         self._create_tables_if_not_exist()        
     def _create_tables_if_not_exist(self):
         #self.session.execute("DROP TABLE IF EXISTS books")
-        self.session.execute("DROP TABLE IF EXISTS users")
-        self.session.execute("DROP TABLE IF EXISTS reservations")
+        #self.session.execute("DROP TABLE IF EXISTS users")
+        #self.session.execute("DROP TABLE IF EXISTS reservations")
 
         self.session.execute(
             """
@@ -96,8 +96,9 @@ class DatabaseManagerSingleton:
     # POTENTIAL CONCURRENT ISSUE
     def check_username_exists(self, username):
         query = SimpleStatement("SELECT * FROM users WHERE username = %s", consistency_level=ConsistencyLevel.ONE)
-
+        print('checking username exists')
         rows = self.session.execute(query, (username,))
+        print(rows._current_rows)
         return len(rows._current_rows) > 0    
     # which consisteny level to use?
     # POTENTIAL CONCURRENT ISSUE
@@ -146,15 +147,15 @@ class DatabaseManagerSingleton:
         # Release lock
         return True  
     # POTENTIAL CONCURRENT ISSUE
-    # BUT RETURN A RECORD, NOT ID
+    # TODO wrong value passed to get_book_by_id
     def get_user_reserved_books(self, username):
         query = SimpleStatement("""
-            SELECT book_id
-            FROM reservations
-            WHERE username = %s
+                SELECT book_id
+                FROM reservations
+                WHERE username = %s ALLOW FILTERING
         """, consistency_level=ConsistencyLevel.ONE)
         rows = self.session.execute(query, (username,))
-        return [row.book_id for row in rows]    
+        return self.get_book_by_id(rows._current_rows)
     # POTENTIAL CONCURRENT ISSUE
     def increment_user_reserved_books(self, username):
         query = SimpleStatement("UPDATE users SET reserved_books = reserved_books + 1 WHERE username = %s", consistency_level=ConsistencyLevel.TWO)
@@ -186,8 +187,7 @@ class MenuDialogSingleton:
         elif choice == "3":
             self.search_book_dialog()
         elif choice == "4":
-            #add code
-            pass
+            self.search_user_dialog()
         elif choice == "5":
             print("Exiting program...")
             return
@@ -259,9 +259,23 @@ class MenuDialogSingleton:
     def view_book_details(self, book_id):
         return
         # Add code    
-    def view_user_reservations_dialog(self, username):
+    def search_user_dialog(self):
+        username = input("Enter the username: ")
+        if not self.db_manager.check_username_exists(username):
+            print("User not found.")
+            return
+        else:
+            self.view_user_reservations(username)
+            return
+    def view_user_reservations(self, username):
+        reservations = self.db_manager.get_user_reserved_books(username)
+        if reservations:
+            print(f"Reservations for user {username}:")
+            for i, book in enumerate(reservations):
+                print(f"{i+1}. {book.title} by {book.author} [{'Available' if book.available else 'Not available'}], ID: {book.book_id}")
+        else:
+            print(f"No reservations found for user {username}.")
         return
-        # Add code
 
 def main():
     print('hello!')
