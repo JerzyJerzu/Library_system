@@ -106,17 +106,23 @@ class DatabaseManagerSingleton:
         rows = self.session.execute(query, (username,))
         return len(rows._current_rows) > 0
     
+    # which consisteny level to use?
+    # POTENTIAL CONCURRENT ISSUE
+    def get_book_by_id(self, book_id):
+            query = SimpleStatement("SELECT * FROM books WHERE book_id = %s", consistency_level=ConsistencyLevel.ONE)
+            rows = self.session.execute(query, (book_id,))
+            return rows.one()
     # POTENTIAL CONCURRENT ISSUE
     # WHY DO I NEED TO SPECIFY ALL CLYSTERING KEY IN QUERY
     def make_reservation(self, username, book_id):
         if not self.check_username_exists(username):
             print("User does not exist. Cannot make reservation.")
             return False
-        
+        """
         if self.check_user_reserved_books(username) >= 10:
             print("User has already reserved 10 books. Cannot make more reservations.")
             return False
-        
+        """
         # LOCK
         self.increment_user_reserved_books(username)
         query = SimpleStatement("""
@@ -127,12 +133,16 @@ class DatabaseManagerSingleton:
         print("Reservation made successfully!")
         
         # Set book to unavailable
-        query = SimpleStatement("""
+        book = self.get_book_by_id(book_id)
+        if book:
+            query = SimpleStatement("""
             UPDATE books
             SET available = false
-            WHERE book_id = %s
-        """, consistency_level=ConsistencyLevel.TWO)
-        self.session.execute(query, (book_id,))
+            WHERE book_id = %s AND title = %s AND author = %s
+            """, consistency_level=ConsistencyLevel.TWO)
+            self.session.execute(query, (book_id, book.title, book.author))
+        else:
+            print("Book not found.")
         
         # Release lock
         return True
