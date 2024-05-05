@@ -25,7 +25,7 @@ class DatabaseManagerSingleton:
     def _create_tables_if_not_exist(self):
         #self.session.execute("DROP TABLE IF EXISTS books")
         self.session.execute("DROP TABLE IF EXISTS users")
-        #self.session.execute("DROP TABLE IF EXISTS reservations")
+        self.session.execute("DROP TABLE IF EXISTS reservations")
 
         self.session.execute(
             """
@@ -71,26 +71,28 @@ class DatabaseManagerSingleton:
         self.session.execute(query, (title, author))
 
     # which consisteny level to use?
+    # SERIOUS ISSUE: SOMETIMES DOES NOT RETURN ALL ROWS
+    # why did copilot recommend above comment?
     def get_books_by_title(self, title):
         query = SimpleStatement("SELECT * FROM books WHERE title = %s ALLOW FILTERING", consistency_level=ConsistencyLevel.ONE)
         rows = self.session.execute(query, (title,))
         return rows._current_rows
     
-    # which consisteny level to use?
+    # which consistency level to use?
     def get_books_by_author(self, author):
         query = SimpleStatement("SELECT * FROM books WHERE author = %s ALLOW FILTERING", consistency_level=ConsistencyLevel.ONE)
         rows = self.session.execute(query, (author,))
         return rows._current_rows
     
     # POTENTIAL CONCURRENT ISSUE
-    # not working
     def add_user(self, username):
         if self.check_username_exists(username):
             print("Username already exists. Please choose a different username.")
             return
         # Even if the user does not exist in the table, the UPDATE statement will create a new row with the specified username and set the reserved_books counter to 0.
         query = SimpleStatement("""
-            UPDATE reservations
+            UPDATE users
+            SET reserved_books = reserved_books + 0
             WHERE username = %s
         """, consistency_level=ConsistencyLevel.TWO)
         self.session.execute(query, (username,))
@@ -100,36 +102,51 @@ class DatabaseManagerSingleton:
     # POTENTIAL CONCURRENT ISSUE
     def check_username_exists(self, username):
         query = SimpleStatement("SELECT * FROM users WHERE username = %s", consistency_level=ConsistencyLevel.ONE)
+
         rows = self.session.execute(query, (username,))
         return len(rows._current_rows) > 0
     
     # POTENTIAL CONCURRENT ISSUE
+    # WHY DO I NEED TO SPECIFY ALL CLYSTERING KEY IN QUERY
     def make_reservation(self, username, book_id):
         if not self.check_username_exists(username):
             print("User does not exist. Cannot make reservation.")
-            return
+            return False
         
         if self.check_user_reserved_books(username) >= 10:
             print("User has already reserved 10 books. Cannot make more reservations.")
-            return
+            return False
         
         # LOCK
         self.increment_user_reserved_books(username)
         query = SimpleStatement("""
             INSERT INTO reservations (username, book_id)
-            VALUES (%s, %s)2
+            VALUES (%s, %s)
         """, consistency_level=ConsistencyLevel.TWO)
         self.session.execute(query, (username, book_id))
         print("Reservation made successfully!")
-        # relase
+        
+        # Set book to unavailable
+        query = SimpleStatement("""
+            UPDATE books
+            SET available = false
+            WHERE book_id = %s
+        """, consistency_level=ConsistencyLevel.TWO)
+        self.session.execute(query, (book_id,))
+        
+        # Release lock
         return True
-        # ADD RETURN FALSE CONDITION
     
     # POTENTIAL CONCURRENT ISSUE
-    def check_user_reserved_books(self, username):
-        query = SimpleStatement("SELECT reserved_books FROM users WHERE username = %s", consistency_level=ConsistencyLevel.ONE)
+    # BUT RETURN A RECORD, NOT ID
+    def get_user_reserved_books(self, username):
+        query = SimpleStatement("""
+            SELECT book_id
+            FROM reservations
+            WHERE username = %s
+        """, consistency_level=ConsistencyLevel.ONE)
         rows = self.session.execute(query, (username,))
-        return rows[0].reserved_books if rows else 0
+        return [row.book_id for row in rows]
     
     # POTENTIAL CONCURRENT ISSUE
     def increment_user_reserved_books(self, username):
@@ -153,7 +170,8 @@ class MenuDialogSingleton:
         print("1. Add a book")
         print("2. Add a new user")
         print("3. Search for a book")
-        print("4. Exit")
+        print("4. View user's reservations")
+        print("5. Exit")
         choice = input("Enter your choice: ")
         self.process_choice(choice)
 
@@ -165,6 +183,9 @@ class MenuDialogSingleton:
         elif choice == "3":
             self.search_book_dialog()
         elif choice == "4":
+            #add code
+            pass
+        elif choice == "5":
             print("Exiting program...")
             return
         else:
@@ -185,18 +206,16 @@ class MenuDialogSingleton:
         username = input("Enter the username: ")
         confirm = input("Press Y to confirm or any other key to cancel: ")
         if confirm.upper() != "Y":
-            self.show_menu()
             return
         self.db_manager.add_user(username)
-        self.show_menu()
-
+        return
+    
     def make_reservation_dialog(self, book_id):
         username = input("Enter a username to make reservation: ")
         if self.db_manager.make_reservation(username, book_id):
             return
         aborting = input("Reservation failed. Press N to return to main menu, or any other key to try again: ")
         if aborting.upper() == "N":
-            self.show_menu()
             return
         self.make_reservation_dialog(book_id)
 
@@ -240,6 +259,10 @@ class MenuDialogSingleton:
         return
     
     def view_book_details(self, book_id):
+        return
+        # Add code
+    
+    def view_user_reservations_dialog(self, username):
         return
         # Add code
 
