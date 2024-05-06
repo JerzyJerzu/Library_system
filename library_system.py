@@ -98,12 +98,11 @@ class DatabaseManagerSingleton:
         query = SimpleStatement("SELECT * FROM users WHERE username = %s", consistency_level=ConsistencyLevel.ONE)
         print('checking username exists')
         rows = self.session.execute(query, (username,))
-        print(rows._current_rows)
         return len(rows._current_rows) > 0    
     # which consisteny level to use?
     # POTENTIAL CONCURRENT ISSUE
     def get_book_by_id(self, book_id):
-            query = SimpleStatement("SELECT * FROM books WHERE book_id = %s", consistency_level=ConsistencyLevel.ONE)
+            query = SimpleStatement("SELECT * FROM books WHERE book_id = %s", consistency_level=ConsistencyLevel.TWO)
             rows = self.session.execute(query, (book_id,))
             return rows.one()
     # which consisteny level to use?
@@ -130,7 +129,6 @@ class DatabaseManagerSingleton:
             VALUES (%s, %s)
         """, consistency_level=ConsistencyLevel.TWO)
         self.session.execute(query, (username, book_id))
-        print("Reservation made successfully!")
         
         # Set book to unavailable
         book = self.get_book_by_id(book_id)
@@ -142,12 +140,13 @@ class DatabaseManagerSingleton:
             """, consistency_level=ConsistencyLevel.TWO)
             self.session.execute(query, (book_id, book.title, book.author))
         else:
-            print("Book not found.")
+            print("Book not found. You should not be seeing this message.")
+            return False
         
         # Release lock
+        print("Reservation made successfully!")
         return True  
     # POTENTIAL CONCURRENT ISSUE
-    # TODO wrong value passed to get_book_by_id
     def get_user_reserved_books(self, username):
         query = SimpleStatement("""
                 SELECT book_id
@@ -155,7 +154,8 @@ class DatabaseManagerSingleton:
                 WHERE username = %s ALLOW FILTERING
         """, consistency_level=ConsistencyLevel.ONE)
         rows = self.session.execute(query, (username,))
-        return self.get_book_by_id(rows.one().book_id)
+        return [self.get_book_by_id(row.book_id) for row in rows._current_rows]
+        #return self.get_book_by_id(rows.one().book_id)
     # POTENTIAL CONCURRENT ISSUE
     def increment_user_reserved_books(self, username):
         query = SimpleStatement("UPDATE users SET reserved_books = reserved_books + 1 WHERE username = %s", consistency_level=ConsistencyLevel.TWO)
@@ -272,7 +272,7 @@ class MenuDialogSingleton:
         if reservations:
             print(f"Reservations for user {username}:")
             for i, book in enumerate(reservations):
-                print(f"{i+1}. {book.title} by {book.author} [{'Available' if book.available else 'Not available'}], ID: {book.book_id}")
+                print(f"{i+1}. {book.title} by {book.author}, ID: {book.book_id}")
         else:
             print(f"No reservations found for user {username}.")
         return
