@@ -123,16 +123,13 @@ class DatabaseManagerSingleton:
             return False
         
         # LOCK
-        self.increment_user_reserved_books(username)
-        query = SimpleStatement("""
-            INSERT INTO reservations (username, book_id)
-            VALUES (%s, %s)
-        """, consistency_level=ConsistencyLevel.TWO)
-        self.session.execute(query, (username, book_id))
-        
         # Set book to unavailable
         book = self.get_book_by_id(book_id)
         if book:
+            if not book.available:
+                print("Book is unavailable. Cannot make reservation.")
+                return False
+            
             query = SimpleStatement("""
             UPDATE books
             SET available = false
@@ -142,6 +139,13 @@ class DatabaseManagerSingleton:
         else:
             print("Book not found. You should not be seeing this message.")
             return False
+        
+        self.increment_user_reserved_books(username)
+        query = SimpleStatement("""
+            INSERT INTO reservations (username, book_id)
+            VALUES (%s, %s)
+        """, consistency_level=ConsistencyLevel.TWO)
+        self.session.execute(query, (username, book_id))
         
         # Release lock
         print("Reservation made successfully!")
@@ -157,10 +161,53 @@ class DatabaseManagerSingleton:
         return [self.get_book_by_id(row.book_id) for row in rows._current_rows]
         #return self.get_book_by_id(rows.one().book_id)
     # POTENTIAL CONCURRENT ISSUE
+    def finish_reservation(self, username, book_id):
+        # Check if the user exists
+        if not self.check_username_exists(username):
+            print("User does not exist. Cannot finish reservation. You should not be seeing this message.")
+            return False
+        
+        # Check if the book exists
+        book = self.get_book_by_id(book_id)
+        if not book:
+            print("Book not found. Cannot finish reservation. You should not be seeing this message.")
+            return False
+        
+        # Check if the book is reserved by the user
+        query = SimpleStatement("""
+            SELECT *
+            FROM reservations
+            WHERE username = %s AND book_id = %s
+        """, consistency_level=ConsistencyLevel.ONE)
+        rows = self.session.execute(query, (username, book_id))
+        if not rows:
+            print("User has not reserved this book. Cannot finish reservation.")
+            return False
+
+        # LOCK
+        query = SimpleStatement("""
+            DELETE FROM reservations
+            WHERE username = %s AND book_id = %s
+        """, consistency_level=ConsistencyLevel.TWO)
+        self.session.execute(query, (username, book_id))
+        self.decrement_user_reserved_books(username)
+        
+        # Set the book as available
+        query = SimpleStatement("""
+            UPDATE books
+            SET available = true
+            WHERE book_id = %s AND title = %s AND author = %s
+        """, consistency_level=ConsistencyLevel.TWO)
+        self.session.execute(query, (book_id, book.title, book.author))
+        
+        print("Reservation finished!")
+        return True
     def increment_user_reserved_books(self, username):
         query = SimpleStatement("UPDATE users SET reserved_books = reserved_books + 1 WHERE username = %s", consistency_level=ConsistencyLevel.TWO)
         self.session.execute(query, (username,))
-
+    def decrement_user_reserved_books(self, username):
+        query = SimpleStatement("UPDATE users SET reserved_books = reserved_books - 1 WHERE username = %s", consistency_level=ConsistencyLevel.TWO)
+        self.session.execute(query, (username,))
 class MenuDialogSingleton:
     _instance = None
     def __new__(cls, *args, **kwargs):
@@ -273,6 +320,18 @@ class MenuDialogSingleton:
             print(f"Reservations for user {username}:")
             for i, book in enumerate(reservations):
                 print(f"{i+1}. {book.title} by {book.author}, ID: {book.book_id}")
+            
+            reservation_index = input("Enter the index of the reservation you wish to finish, or N to cancel:")
+            if reservation_index.upper() == "N":
+                return
+            # add test for invalid input
+            reservation_index = int(reservation_index)
+            if reservation_index < 1 or reservation_index > len(reservations):
+                print("Invalid reservation index. Please try again.")
+                self.view_user_reservations(username)
+                return
+            book_id = reservations[reservation_index-1].book_id
+            self.db_manager.finish_reservation(username, book_id)
         else:
             print(f"No reservations found for user {username}.")
         return
