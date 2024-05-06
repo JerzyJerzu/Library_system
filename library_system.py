@@ -7,6 +7,7 @@ from cassandra.query import SimpleStatement, ConsistencyLevel
 
 class DatabaseManagerSingleton:
     _instance = None
+    max_reserved_books = 2
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
@@ -118,8 +119,8 @@ class DatabaseManagerSingleton:
             print("User does not exist. Cannot make reservation.")
             return False
         
-        if self.check_user_reserved_books(username) >= 2:
-            print("User has already reserved 2 books. Cannot make more reservations.")
+        if self.check_user_reserved_books(username) >= self.max_reserved_books:
+            print("User has already reserved", self.max_reserved_books, "books. Cannot make more reservations.")
             return False
         
         # LOCK
@@ -202,12 +203,17 @@ class DatabaseManagerSingleton:
         
         print("Reservation finished!")
         return True
+    # which consisteny level to use?
+    # POTENTIAL CONCURRENT ISSUE
     def increment_user_reserved_books(self, username):
         query = SimpleStatement("UPDATE users SET reserved_books = reserved_books + 1 WHERE username = %s", consistency_level=ConsistencyLevel.TWO)
         self.session.execute(query, (username,))
+    # which consisteny level to use?
+    # POTENTIAL CONCURRENT ISSUE
     def decrement_user_reserved_books(self, username):
         query = SimpleStatement("UPDATE users SET reserved_books = reserved_books - 1 WHERE username = %s", consistency_level=ConsistencyLevel.TWO)
         self.session.execute(query, (username,))
+
 class MenuDialogSingleton:
     _instance = None
     def __new__(cls, *args, **kwargs):
@@ -265,6 +271,7 @@ class MenuDialogSingleton:
         if aborting.upper() == "N":
             return
         self.make_reservation_dialog(book_id)
+    # display also by whom the book is reserved
     def search_book_dialog(self):
         search_option = input("Search by (1) Title or (2) Author: ")
         if search_option == "1":
@@ -287,8 +294,14 @@ class MenuDialogSingleton:
         if books:
             print("Matching books:")
             for i, book in enumerate(books):
-                print(f"{i+1}. {book.title} by {book.author} [{'Available' if book.available else 'Not available'}], ID: {book.book_id}")
-
+                print(f"{i+1}. {book.title} by {book.author} [Available], ID: {book.book_id}")
+                """
+                if book.available:
+                    print(f"{i+1}. {book.title} by {book.author} [Available], ID: {book.book_id}")
+                else:
+                    reserved_by = self.db_manager.check_user_reserved_books(book.reserved_by)
+                    print(f"{i+1}. {book.title} by {book.author} [Reserved by: {reserved_by}], ID: {book.book_id}")
+                """
             book_index = input("Enter the index of the book you wish to reserve, or N to cancel:")
             if book_index.upper() == "N":
                 return
