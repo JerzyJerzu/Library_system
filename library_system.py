@@ -31,7 +31,7 @@ class DatabaseManagerSingleton:
         print('keyspace set')
         self._create_tables_if_not_exist()        
     def _create_tables_if_not_exist(self):
-        #self.session.execute("DROP TABLE IF EXISTS books")
+        self.session.execute("DROP TABLE IF EXISTS books")
         #self.session.execute("DROP TABLE IF EXISTS users")
         #self.session.execute("DROP TABLE IF EXISTS reservations")
 
@@ -42,7 +42,7 @@ class DatabaseManagerSingleton:
                 title text,
                 author text,
                 available boolean,
-                PRIMARY KEY (book_id, title, author)
+                PRIMARY KEY (title, book_id)
             )
             """
         )
@@ -82,10 +82,9 @@ class DatabaseManagerSingleton:
     # SERIOUS ISSUE: SOMETIMES DOES NOT RETURN ALL ROWS
     # why did copilot recommend above comment?
     def get_books_by_title(self, title):
-        query = SimpleStatement("SELECT * FROM books WHERE title = %s ALLOW FILTERING", consistency_level=ConsistencyLevel.ONE)
+        query = SimpleStatement("SELECT * FROM books WHERE title = %s", consistency_level=ConsistencyLevel.ONE)
         rows = self.session.execute(query, (title,))
         return rows._current_rows    
-    def get_books_by_author(self, author):
         query = SimpleStatement("SELECT * FROM books WHERE author = %s ALLOW FILTERING", consistency_level=ConsistencyLevel.ONE)
         rows = self.session.execute(query, (author,))
         return rows._current_rows    
@@ -285,19 +284,10 @@ class MenuDialogSingleton:
         self.make_reservation_dialog(book_id)
     # display also by whom the book is reserved
     def search_book_dialog(self):
-        search_option = input("Search by (1) Title or (2) Author: ")
-        if search_option == "1":
-            search_term = input("Enter the title of the book: ")
-            books = self.db_manager.get_books_by_title(search_term)
-        elif search_option == "2":
-            search_term = input("Enter the author of the book: ")
-            books = self.db_manager.get_books_by_author(search_term)
-        else:
-            print("Invalid search option. Please try again.")
-            self.search_book_dialog()
-            return
+        search_term = input("Enter the title of the book: ")
+        books = self.db_manager.get_books_by_title(search_term)
         
-        if len(books) > 5:
+        if len(books) > 10:
             print(f"Matching books: {len(books)} books found.")
             proceed = input("Do you want to proceed? (Y/N): ")
             if proceed.upper() != "Y":
@@ -327,10 +317,7 @@ class MenuDialogSingleton:
             self.make_reservation_dialog(book_id)
         else:
             print("No matching books found.")
-        return    
-    def view_book_details(self, book_id):
-        return
-        # Add code    
+        return     
     def search_user_dialog(self):
         username = input("Enter the username: ")
         if not self.db_manager.check_username_exists(username):
