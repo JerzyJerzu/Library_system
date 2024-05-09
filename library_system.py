@@ -5,6 +5,7 @@ import unittest
 from cassandra.cluster import Cluster
 from cassandra.metadata import KeyspaceMetadata
 from cassandra.query import SimpleStatement, ConsistencyLevel
+from datetime import datetime, timezone
 
 class ExampleTest(unittest.TestCase):
     def test_100_user_inserts(self):
@@ -31,7 +32,7 @@ class DatabaseManagerSingleton:
         self._create_tables_if_not_exist()        
     def _create_tables_if_not_exist(self):
         #self.session.execute("DROP TABLE IF EXISTS books")
-        self.session.execute("DROP TABLE IF EXISTS users")
+        #self.session.execute("DROP TABLE IF EXISTS users")
         #self.session.execute("DROP TABLE IF EXISTS reservations")
 
         self.session.execute(
@@ -62,9 +63,10 @@ class DatabaseManagerSingleton:
             # ADD due date
             """
             CREATE TABLE IF NOT EXISTS reservations (
-                username text,
-                book_id uuid,
-                PRIMARY KEY ((username, book_id)),
+            username text,
+            book_id uuid,
+            due_date timestamp,
+            PRIMARY KEY (username, book_id)
             )
             """
         )
@@ -77,14 +79,12 @@ class DatabaseManagerSingleton:
         """, consistency_level=ConsistencyLevel.TWO)
         self.session.execute(query, (title, author))
         return True
-    # which consisteny level to use?
     # SERIOUS ISSUE: SOMETIMES DOES NOT RETURN ALL ROWS
     # why did copilot recommend above comment?
     def get_books_by_title(self, title):
         query = SimpleStatement("SELECT * FROM books WHERE title = %s ALLOW FILTERING", consistency_level=ConsistencyLevel.ONE)
         rows = self.session.execute(query, (title,))
         return rows._current_rows    
-    # which consistency level to use?
     def get_books_by_author(self, author):
         query = SimpleStatement("SELECT * FROM books WHERE author = %s ALLOW FILTERING", consistency_level=ConsistencyLevel.ONE)
         rows = self.session.execute(query, (author,))
@@ -123,7 +123,7 @@ class DatabaseManagerSingleton:
         return rows.one().reserved_books
     # POTENTIAL CONCURRENT ISSUE
     # WHY DO I NEED TO SPECIFY ALL CLYSTERING KEY IN QUERY
-    def make_reservation(self, username, book_id):
+    def make_reservation(self, username, book_id, due_date_str):
         if not self.check_username_exists(username):
             print("User does not exist. Cannot make reservation.")
             return False
@@ -131,7 +131,8 @@ class DatabaseManagerSingleton:
         if self.check_user_reserved_books(username) >= self.max_reserved_books:
             print("User has already reserved", self.max_reserved_books, "books. Cannot make more reservations.")
             return False
-        
+        due_date = datetime.strptime(due_date_str, '%d.%m.%Y')
+        due_date = due_date.replace(tzinfo=timezone.utc)
         # LOCK
         # Set book to unavailable
         book = self.get_book_by_id(book_id)
@@ -152,10 +153,10 @@ class DatabaseManagerSingleton:
         
         self.increment_user_reserved_books(username)
         query = SimpleStatement("""
-            INSERT INTO reservations (username, book_id)
-            VALUES (%s, %s)
+            INSERT INTO reservations (username, book_id, due_date)
+            VALUES (%s, %s, %s)
         """, consistency_level=ConsistencyLevel.TWO)
-        self.session.execute(query, (username, book_id))
+        self.session.execute(query, (username, book_id, due_date))
         
         # Release lock
         print("Reservation made successfully!")
@@ -163,12 +164,13 @@ class DatabaseManagerSingleton:
     # POTENTIAL CONCURRENT ISSUE
     def get_user_reserved_books(self, username):
         query = SimpleStatement("""
-                SELECT book_id
+                SELECT book_id, due_date
                 FROM reservations
-                WHERE username = %s ALLOW FILTERING
+                WHERE username = %s
         """, consistency_level=ConsistencyLevel.ONE)
         rows = self.session.execute(query, (username,))
-        return [self.get_book_by_id(row.book_id) for row in rows._current_rows]
+        print([(self.get_book_by_id(row.book_id), row.due_date) for row in rows._current_rows])
+        return [(self.get_book_by_id(row.book_id), row.due_date) for row in rows._current_rows]
         #return self.get_book_by_id(rows.one().book_id)
     # POTENTIAL CONCURRENT ISSUE
     def finish_reservation(self, username, book_id):
@@ -274,7 +276,8 @@ class MenuDialogSingleton:
         return    
     def make_reservation_dialog(self, book_id):
         username = input("Enter a username to make reservation: ")
-        if self.db_manager.make_reservation(username, book_id):
+        due_date = input("Enter the due date of the reservation (dd.mm.yyyy): ")
+        if self.db_manager.make_reservation(username, book_id, due_date):
             return
         aborting = input("Reservation failed. Press N to return to main menu, or any other key to try again: ")
         if aborting.upper() == "N":
@@ -341,7 +344,7 @@ class MenuDialogSingleton:
         if reservations:
             print(f"Reservations for user {username}:")
             for i, book in enumerate(reservations):
-                print(f"{i+1}. {book.title} by {book.author}, ID: {book.book_id}")
+                print(f"{i+1}. {book[0].title} by {book[0].author}, ID: {book[0].book_id}, Due date: {book[1]}")
             
             reservation_index = input("Enter the index of the reservation you wish to finish, or N to cancel:")
             if reservation_index.upper() == "N":
