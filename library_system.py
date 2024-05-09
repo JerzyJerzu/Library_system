@@ -1,9 +1,17 @@
 import threading
 import random
 import time
+import unittest
 from cassandra.cluster import Cluster
 from cassandra.metadata import KeyspaceMetadata
 from cassandra.query import SimpleStatement, ConsistencyLevel
+
+class ExampleTest(unittest.TestCase):
+    def test_100_user_inserts(self):
+        db_manager = DatabaseManagerSingleton()
+        for i in range(100):
+            db_manager.add_user(f'user{i}')
+            self.assertEqual(db_manager.check_username_exists(f'user{i}'), True)
 
 class DatabaseManagerSingleton:
     _instance = None
@@ -23,7 +31,7 @@ class DatabaseManagerSingleton:
         self._create_tables_if_not_exist()        
     def _create_tables_if_not_exist(self):
         #self.session.execute("DROP TABLE IF EXISTS books")
-        #self.session.execute("DROP TABLE IF EXISTS users")
+        self.session.execute("DROP TABLE IF EXISTS users")
         #self.session.execute("DROP TABLE IF EXISTS reservations")
 
         self.session.execute(
@@ -68,6 +76,7 @@ class DatabaseManagerSingleton:
             VALUES (uuid(), %s, %s, true)
         """, consistency_level=ConsistencyLevel.TWO)
         self.session.execute(query, (title, author))
+        return True
     # which consisteny level to use?
     # SERIOUS ISSUE: SOMETIMES DOES NOT RETURN ALL ROWS
     # why did copilot recommend above comment?
@@ -90,7 +99,7 @@ class DatabaseManagerSingleton:
             UPDATE users
             SET reserved_books = reserved_books + 0
             WHERE username = %s
-        """, consistency_level=ConsistencyLevel.TWO)
+        """)
         self.session.execute(query, (username,))
         print("User added successfully!")   
     # which consisteny level to use?
@@ -350,16 +359,15 @@ class MenuDialogSingleton:
         return
 
 def main():
-    print('hello!')
-    contact_points = ['127.0.1.1', '127.0.1.2', '127.0.1.3']
-    port = 9042
-    keyspace_name = 'library_project'
-
-    db_manager = DatabaseManagerSingleton(contact_points, port, keyspace_name)
     menu_dialog = MenuDialogSingleton()
     menu_dialog.show_menu()
 
 if __name__ == "__main__":
+    contact_points = ['127.0.1.1', '127.0.1.2', '127.0.1.3']
+    port = 9042
+    keyspace_name = 'library_project'
+    db_manager = DatabaseManagerSingleton(contact_points, port, keyspace_name)
+    #unittest.main()
     main()
     
 """
@@ -378,3 +386,4 @@ def main():
     db_manager.get_replicas('books', lotr_books[1].book_id)
     dialog.show_dialog('Done')
 """
+    
