@@ -1,3 +1,4 @@
 1. reserved by
 2. consistency levels
-3. handling stress tests
+3. concurent operations
+4. handling stress tests

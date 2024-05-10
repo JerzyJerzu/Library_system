@@ -32,8 +32,8 @@ class DatabaseManagerSingleton:
         self._create_tables_if_not_exist()        
     def _create_tables_if_not_exist(self):
         self.session.execute("DROP TABLE IF EXISTS books")
-        #self.session.execute("DROP TABLE IF EXISTS users")
-        #self.session.execute("DROP TABLE IF EXISTS reservations")
+        self.session.execute("DROP TABLE IF EXISTS users")
+        self.session.execute("DROP TABLE IF EXISTS reservations")
 
         self.session.execute(
             """
@@ -65,6 +65,7 @@ class DatabaseManagerSingleton:
             CREATE TABLE IF NOT EXISTS reservations (
             username text,
             book_id uuid,
+            book_title text,
             due_date timestamp,
             PRIMARY KEY (username, book_id)
             )
@@ -84,10 +85,7 @@ class DatabaseManagerSingleton:
     def get_books_by_title(self, title):
         query = SimpleStatement("SELECT * FROM books WHERE title = %s", consistency_level=ConsistencyLevel.ONE)
         rows = self.session.execute(query, (title,))
-        return rows._current_rows    
-        query = SimpleStatement("SELECT * FROM books WHERE author = %s ALLOW FILTERING", consistency_level=ConsistencyLevel.ONE)
-        rows = self.session.execute(query, (author,))
-        return rows._current_rows    
+        return rows._current_rows   
     # POTENTIAL CONCURRENT ISSUE
     def add_user(self, username):
         if self.check_username_exists(username):
@@ -107,12 +105,13 @@ class DatabaseManagerSingleton:
         query = SimpleStatement("SELECT * FROM users WHERE username = %s", consistency_level=ConsistencyLevel.ONE)
         print('checking username exists')
         rows = self.session.execute(query, (username,))
+        print(rows._current_rows)
         return len(rows._current_rows) > 0    
     # which consisteny level to use?
     # POTENTIAL CONCURRENT ISSUE
-    def get_book_by_id(self, book_id):
-            query = SimpleStatement("SELECT * FROM books WHERE book_id = %s", consistency_level=ConsistencyLevel.TWO)
-            rows = self.session.execute(query, (book_id,))
+    def get_book(self, title, book_id):
+            query = SimpleStatement("SELECT * FROM books WHERE title = %s AND book_id = %s", consistency_level=ConsistencyLevel.TWO)
+            rows = self.session.execute(query, (title, book_id))
             return rows.one()
     # which consisteny level to use?
     # POTENTIAL CONCURRENT ISSUE
@@ -122,7 +121,7 @@ class DatabaseManagerSingleton:
         return rows.one().reserved_books
     # POTENTIAL CONCURRENT ISSUE
     # WHY DO I NEED TO SPECIFY ALL CLYSTERING KEY IN QUERY
-    def make_reservation(self, username, book_id, due_date_str):
+    def make_reservation(self, username, book_title, book_id, due_date_str):
         if not self.check_username_exists(username):
             print("User does not exist. Cannot make reservation.")
             return False
@@ -134,7 +133,7 @@ class DatabaseManagerSingleton:
         due_date = due_date.replace(tzinfo=timezone.utc)
         # LOCK
         # Set book to unavailable
-        book = self.get_book_by_id(book_id)
+        book = self.get_book(book_title, book_id)
         if book:
             if not book.available:
                 print("Book is unavailable. Cannot make reservation.")
@@ -143,19 +142,19 @@ class DatabaseManagerSingleton:
             query = SimpleStatement("""
             UPDATE books
             SET available = false
-            WHERE book_id = %s AND title = %s AND author = %s
+            WHERE book_id = %s AND title = %s
             """, consistency_level=ConsistencyLevel.TWO)
-            self.session.execute(query, (book_id, book.title, book.author))
+            self.session.execute(query, (book_id, book.title))
         else:
             print("Book not found. You should not be seeing this message.")
             return False
         
         self.increment_user_reserved_books(username)
         query = SimpleStatement("""
-            INSERT INTO reservations (username, book_id, due_date)
-            VALUES (%s, %s, %s)
+            INSERT INTO reservations (username, book_id, book_title, due_date)
+            VALUES (%s, %s, %s, %s)
         """, consistency_level=ConsistencyLevel.TWO)
-        self.session.execute(query, (username, book_id, due_date))
+        self.session.execute(query, (username, book_id, book_title, due_date))
         
         # Release lock
         print("Reservation made successfully!")
@@ -163,23 +162,23 @@ class DatabaseManagerSingleton:
     # POTENTIAL CONCURRENT ISSUE
     def get_user_reserved_books(self, username):
         query = SimpleStatement("""
-                SELECT book_id, due_date
+                SELECT book_title, book_id, due_date
                 FROM reservations
                 WHERE username = %s
         """, consistency_level=ConsistencyLevel.ONE)
         rows = self.session.execute(query, (username,))
-        print([(self.get_book_by_id(row.book_id), row.due_date) for row in rows._current_rows])
-        return [(self.get_book_by_id(row.book_id), row.due_date) for row in rows._current_rows]
-        #return self.get_book_by_id(rows.one().book_id)
+        print(rows._current_rows)
+        print([(self.get_book(row.book_title, row.book_id), row.due_date) for row in rows._current_rows])
+        return [(self.get_book(row.book_title, row.book_id), row.due_date) for row in rows._current_rows]
     # POTENTIAL CONCURRENT ISSUE
-    def finish_reservation(self, username, book_id):
+    def finish_reservation(self, username, book_id, book_title):
         # Check if the user exists
         if not self.check_username_exists(username):
             print("User does not exist. Cannot finish reservation. You should not be seeing this message.")
             return False
         
         # Check if the book exists
-        book = self.get_book_by_id(book_id)
+        book = self.get_book(book_title, book_id)
         if not book:
             print("Book not found. Cannot finish reservation. You should not be seeing this message.")
             return False
@@ -273,15 +272,15 @@ class MenuDialogSingleton:
             return
         self.db_manager.add_user(username)
         return    
-    def make_reservation_dialog(self, book_id):
+    def make_reservation_dialog(self, book_id, book_title):
         username = input("Enter a username to make reservation: ")
         due_date = input("Enter the due date of the reservation (dd.mm.yyyy): ")
-        if self.db_manager.make_reservation(username, book_id, due_date):
+        if self.db_manager.make_reservation(username, book_title, book_id, due_date):
             return
         aborting = input("Reservation failed. Press N to return to main menu, or any other key to try again: ")
         if aborting.upper() == "N":
             return
-        self.make_reservation_dialog(book_id)
+        self.make_reservation_dialog(book_id, book_title)
     # display also by whom the book is reserved
     def search_book_dialog(self):
         search_term = input("Enter the title of the book: ")
@@ -314,7 +313,8 @@ class MenuDialogSingleton:
                 self.search_book_dialog()
                 return
             book_id = books[book_index-1].book_id
-            self.make_reservation_dialog(book_id)
+            book_title = books[book_index-1].title
+            self.make_reservation_dialog(book_id, book_title)
         else:
             print("No matching books found.")
         return     
@@ -343,7 +343,8 @@ class MenuDialogSingleton:
                 self.view_user_reservations(username)
                 return
             book_id = reservations[reservation_index-1].book_id
-            self.db_manager.finish_reservation(username, book_id)
+            book_title = reservations[reservation_index-1].book_title
+            self.db_manager.finish_reservation(username, book_id, book_title)
         else:
             print(f"No reservations found for user {username}.")
         return
