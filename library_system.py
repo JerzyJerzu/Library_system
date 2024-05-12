@@ -6,8 +6,79 @@ from cassandra.cluster import Cluster
 from cassandra.metadata import KeyspaceMetadata
 from cassandra.query import SimpleStatement, ConsistencyLevel
 from datetime import datetime, timezone
+import logging
 
 class ExampleTest(unittest.TestCase):
+    def test_stress_1(self):
+        db_manager = DatabaseManagerSingleton()
+        username = "test_user"
+        book_title = "Test Book"
+        due_date_str = "01.01.2023"
+
+        # Add the book to the database
+        db_manager.add_book(book_title, "Test Author")
+
+        # Retrieve the book id by title
+        books = db_manager.get_books_by_title(book_title)
+        book_id = books[0].book_id
+
+        # Add the user to the database
+        db_manager.add_user(username)
+        succesfull_reservations = 0
+        lock = threading.Lock()
+
+        # Make multiple reservations quickly
+        def make_reservation_thread():
+            nonlocal succesfull_reservations
+            for i in range(10):
+                if db_manager.make_reservation(username, book_title, book_id, due_date_str):
+                    with lock:
+                        succesfull_reservations += 1
+
+        threads = []
+        for _ in range(10):
+            t = threading.Thread(target=make_reservation_thread)
+            threads.append(t)
+            t.start()
+
+        for t in threads:
+            t.join()
+
+        self.assertEqual(succesfull_reservations, 1)
+
+    # adds speciifed number of books and returns their titles
+    def add_some_books(self, num_books):
+        db_manager = DatabaseManagerSingleton()
+        book_titles = []
+
+        for i in range(num_books):
+            book_title = f"Test Book {i+1}"
+            db_manager.add_book(book_title, "Test Author")
+            book_titles.append(book_title)
+
+        return book_titles
+    
+    def make_random_requests(self, books, username):
+            db_manager = DatabaseManagerSingleton()
+            due_date_str = "01.01.2023"
+            for _ in range(10):
+                book_title = random.choice(books)
+                books_by_title = db_manager.get_books_by_title(book_title)
+                book_id = books_by_title[0].book_id
+                db_manager.make_reservation(username, book_title, book_id, due_date_str)
+
+    def test_stress_2(self):
+        threads = []
+        books = self.add_some_books(40)
+        thread_1 = threading.Thread(target=self.make_random_reservations, args=(books,  'Test_user_A'))
+        threads.append(thread_1)
+        thread_2 = threading.Thread(target=self.make_random_reservations, args=(books, 'Test_user_B'))
+        threads.append(thread_2)
+        threads.start()
+
+        for t in threads:
+            t.join()
+
     def test_100_user_inserts(self):
         db_manager = DatabaseManagerSingleton()
         for i in range(100):
@@ -101,12 +172,13 @@ class DatabaseManagerSingleton:
         print("User added successfully!")   
     # which consisteny level to use?
     # POTENTIAL CONCURRENT ISSUE
+    # SOMETIMES DOES NOT DETECT USER
     def check_username_exists(self, username):
-        query = SimpleStatement("SELECT * FROM users WHERE username = %s", consistency_level=ConsistencyLevel.ONE)
+        query = SimpleStatement("SELECT * FROM users WHERE username = %s", consistency_level=ConsistencyLevel.TWO)
         print('checking username exists')
         rows = self.session.execute(query, (username,))
         print(rows._current_rows)
-        return len(rows._current_rows) > 0    
+        return len(rows._current_rows) > 0
     # which consisteny level to use?
     # POTENTIAL CONCURRENT ISSUE
     def get_book(self, title, book_id):
@@ -121,42 +193,59 @@ class DatabaseManagerSingleton:
         return rows.one().reserved_books
     # POTENTIAL CONCURRENT ISSUE
     # WHY DO I NEED TO SPECIFY ALL CLYSTERING KEY IN QUERY
+    def lock_book(self, book_id, title):
+        query = SimpleStatement("""
+            UPDATE books
+            SET available = false
+            WHERE book_id = %s AND title = %s
+            IF available = true
+            """, consistency_level=ConsistencyLevel.TWO)
+        query_result = self.session.execute(query, (book_id, title))
+        if not query_result.one().applied:
+            print("Didn't manage to lock the book")
+            return False
+        return True
+    def unlock_book(self, book_id, title):
+        query = SimpleStatement("""
+            UPDATE books
+            SET available = true
+            WHERE book_id = %s AND title = %s
+            """, consistency_level=ConsistencyLevel.TWO)
+        query_result = self.session.execute(query, (book_id, title))
+        if not query_result.one().applied:
+            raise Exception("Failed to release lock on book. You shouldn't be seeing this message!")
+        return True
+    
     def make_reservation(self, username, book_title, book_id, due_date_str):
         if not self.check_username_exists(username):
             print("User does not exist. Cannot make reservation.")
-            return False
-        
+            return False        
         if self.check_user_reserved_books(username) >= self.max_reserved_books:
             print("User has already reserved", self.max_reserved_books, "books. Cannot make more reservations.")
             return False
         due_date = datetime.strptime(due_date_str, '%d.%m.%Y')
-        due_date = due_date.replace(tzinfo=timezone.utc)
-        # LOCK
-        # Set book to unavailable
+        due_date = due_date.replace(tzinfo=timezone.utc)        
         book = self.get_book(book_title, book_id)
         if book:
             if not book.available:
                 print("Book is unavailable. Cannot make reservation.")
                 return False
-            
-            query = SimpleStatement("""
-            UPDATE books
-            SET available = false
-            WHERE book_id = %s AND title = %s
-            """, consistency_level=ConsistencyLevel.TWO)
-            self.session.execute(query, (book_id, book.title))
+            # Set book to unavailable
+            if not self.lock_book(book_id, book_title):
+                return False   
         else:
             print("Book not found. You should not be seeing this message.")
             return False
-        
-        self.increment_user_reserved_books(username)
+        # reserve user slot for a book
+        if not self.increment_user_reserved_books(username):
+            self.unlock_book(book_id, book_title)
         query = SimpleStatement("""
             INSERT INTO reservations (username, book_id, book_title, due_date)
             VALUES (%s, %s, %s, %s)
         """, consistency_level=ConsistencyLevel.TWO)
-        self.session.execute(query, (username, book_id, book_title, due_date))
-        
-        # Release lock
+        query_result = self.session.execute(query, (username, book_id, book_title, due_date))
+        if not query_result.one().applied:
+            raise Exception("Failed to make reservation.")
         print("Reservation made successfully!")
         return True  
     # POTENTIAL CONCURRENT ISSUE
@@ -215,13 +304,20 @@ class DatabaseManagerSingleton:
     # which consisteny level to use?
     # POTENTIAL CONCURRENT ISSUE
     def increment_user_reserved_books(self, username):
-        query = SimpleStatement("UPDATE users SET reserved_books = reserved_books + 1 WHERE username = %s", consistency_level=ConsistencyLevel.TWO)
-        self.session.execute(query, (username,))
+        query = SimpleStatement("UPDATE users SET reserved_books = reserved_books + 1 WHERE username = %s IF reserved_books < %s", consistency_level=ConsistencyLevel.TWO)
+        result = self.session.execute(query, (username, self.max_reserved_books))
+        if not result.one().applied:
+            return True
+        else:
+            print("Failed to increment reserved books. User has already reserved the maximum number of books.")
+            return False
     # which consisteny level to use?
     # POTENTIAL CONCURRENT ISSUE
     def decrement_user_reserved_books(self, username):
-        query = SimpleStatement("UPDATE users SET reserved_books = reserved_books - 1 WHERE username = %s", consistency_level=ConsistencyLevel.TWO)
-        self.session.execute(query, (username,))
+        query = SimpleStatement("UPDATE users SET reserved_books = reserved_books - 1 WHERE username = %s IF reserved_books > 0", consistency_level=ConsistencyLevel.TWO)
+        result = self.session.execute(query, (username,))
+        if not result.one().applied:
+            raise Exception("Trying to decrement reserved books below 0.")
 
 class MenuDialogSingleton:
     _instance = None
@@ -274,7 +370,13 @@ class MenuDialogSingleton:
         return    
     def make_reservation_dialog(self, book_id, book_title):
         username = input("Enter a username to make reservation: ")
-        due_date = input("Enter the due date of the reservation (dd.mm.yyyy): ")
+        while True:
+            due_date = input("Enter the due date of the reservation (dd.mm.yyyy): ")
+            try:
+                datetime.strptime(due_date, "%d.%m.%Y")
+                break
+            except ValueError:
+                print("Invalid date format. Please try again.")
         if self.db_manager.make_reservation(username, book_title, book_id, due_date):
             return
         aborting = input("Reservation failed. Press N to return to main menu, or any other key to try again: ")

@@ -1,4 +1,4 @@
-1. reserved by
+1. int inputs
 2. consistency levels
 3. concurent operations
 4. handling stress tests
