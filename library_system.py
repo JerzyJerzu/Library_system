@@ -123,7 +123,7 @@ class DatabaseManagerSingleton:
             """
             CREATE TABLE IF NOT EXISTS users (
                 username text,
-                reserved_books counter,
+                reserved_books INT,
                 PRIMARY KEY (username)
             )
             """
@@ -162,11 +162,9 @@ class DatabaseManagerSingleton:
         if self.check_username_exists(username):
             print("Username already exists. Please choose a different username.")
             return
-        # Even if the user does not exist in the table, the UPDATE statement will create a new row with the specified username and set the reserved_books counter to 0.
         query = SimpleStatement("""
-            UPDATE users
-            SET reserved_books = reserved_books + 0
-            WHERE username = %s
+            INSERT INTO users (username, reserved_books)
+            VALUES (%s, 0)
         """)
         self.session.execute(query, (username,))
         print("User added successfully!")   
@@ -243,9 +241,7 @@ class DatabaseManagerSingleton:
             INSERT INTO reservations (username, book_id, book_title, due_date)
             VALUES (%s, %s, %s, %s)
         """, consistency_level=ConsistencyLevel.TWO)
-        query_result = self.session.execute(query, (username, book_id, book_title, due_date))
-        if not query_result.one().applied:
-            raise Exception("Failed to make reservation.")
+        self.session.execute(query, (username, book_id, book_title, due_date))
         print("Reservation made successfully!")
         return True  
     # POTENTIAL CONCURRENT ISSUE
@@ -306,7 +302,8 @@ class DatabaseManagerSingleton:
     def increment_user_reserved_books(self, username):
         query = SimpleStatement("UPDATE users SET reserved_books = reserved_books + 1 WHERE username = %s IF reserved_books < %s", consistency_level=ConsistencyLevel.TWO)
         result = self.session.execute(query, (username, self.max_reserved_books))
-        if not result.one().applied:
+        print('books incermeted: ', result.one())
+        if result.one().applied:
             return True
         else:
             print("Failed to increment reserved books. User has already reserved the maximum number of books.")
@@ -397,11 +394,11 @@ class MenuDialogSingleton:
         if books:
             print("Matching books:")
             for i, book in enumerate(books):
-                print(f"{i+1}. {book.title} by {book.author} [Available], ID: {book.book_id}")
-                """
                 if book.available:
                     print(f"{i+1}. {book.title} by {book.author} [Available], ID: {book.book_id}")
                 else:
+                    print(f"{i+1}. {book.title} by {book.author} [Reserved], ID: {book.book_id}")
+                """
                     reserved_by = self.db_manager.check_user_reserved_books(book.reserved_by)
                     print(f"{i+1}. {book.title} by {book.author} [Reserved by: {reserved_by}], ID: {book.book_id}")
                 """
@@ -444,8 +441,8 @@ class MenuDialogSingleton:
                 print("Invalid reservation index. Please try again.")
                 self.view_user_reservations(username)
                 return
-            book_id = reservations[reservation_index-1].book_id
-            book_title = reservations[reservation_index-1].book_title
+            book_id = reservations[reservation_index-1][0].book_id
+            book_title = reservations[reservation_index-1][0].title
             self.db_manager.finish_reservation(username, book_id, book_title)
         else:
             print(f"No reservations found for user {username}.")
