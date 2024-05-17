@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 import logging
 
 class ExampleTest(unittest.TestCase):
-    def test_stress_1(self):
+    def a_test_stress_1(self):
         db_manager = DatabaseManagerSingleton()
         username = "test_user"
         book_title = "Test Book"
@@ -36,7 +36,7 @@ class ExampleTest(unittest.TestCase):
                         succesfull_reservations += 1
 
         threads = []
-        for _ in range(10):
+        for _ in range(10000):
             t = threading.Thread(target=make_reservation_thread)
             threads.append(t)
             t.start()
@@ -60,6 +60,7 @@ class ExampleTest(unittest.TestCase):
     
     def make_random_requests(self, books, username):
             db_manager = DatabaseManagerSingleton()
+            db_manager.add_user(username)
             due_date_str = "01.01.2023"
             for _ in range(10):
                 book_title = random.choice(books)
@@ -67,27 +68,52 @@ class ExampleTest(unittest.TestCase):
                 book_id = books_by_title[0].book_id
                 db_manager.make_reservation(username, book_title, book_id, due_date_str)
 
-    def test_stress_2(self):
+    def a_test_stress_2(self):
         threads = []
         books = self.add_some_books(40)
-        thread_1 = threading.Thread(target=self.make_random_reservations, args=(books,  'Test_user_A'))
-        threads.append(thread_1)
-        thread_2 = threading.Thread(target=self.make_random_reservations, args=(books, 'Test_user_B'))
-        threads.append(thread_2)
-        threads.start()
+        usernames = ['Test_user_A', 'Test_user_B', 'Test_user_C', 'Test_user_D']
+        for username in usernames:
+            thread = threading.Thread(target=self.make_random_requests, args=(books, username))
+            threads.append(thread)
+            thread.start()
 
         for t in threads:
             t.join()
 
+        self.assertTrue(self.check_reserved_books(usernames))
+
+    def check_reserved_books(self, usernames):
+        db_manager = DatabaseManagerSingleton()
+        reserved_books = []
+        book_ids = set()
+
+        for username in usernames:
+            print(f"Test user: {username}")
+            user_reserved_books = db_manager.get_user_reserved_books(username)
+            if len(user_reserved_books) > db_manager.max_reserved_books:
+                print('USER RESERVED MORE BOOKS THAN ALLOWED!')
+                return False
+            reserved_books.extend(user_reserved_books)
+
+        # Store the book ids in a set to check for uniqueness
+        book_ids = set()
+        for book in reserved_books:
+            if book[0].book_id in book_ids:
+                return False
+            print(book[0].book_id)
+            book_ids.add(book[0].book_id)
+        
+        print('STRESS TEST 2 CORRECT')
+        return True
+    
     def test_100_user_inserts(self):
         db_manager = DatabaseManagerSingleton()
         for i in range(100):
             db_manager.add_user(f'user{i}')
             self.assertEqual(db_manager.check_username_exists(f'user{i}'), True)
-
 class DatabaseManagerSingleton:
     _instance = None
-    max_reserved_books = 2
+    max_reserved_books = 10
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
@@ -119,7 +145,6 @@ class DatabaseManagerSingleton:
         )
         print('created books')
         self.session.execute(
-            # counter is 0 by default
             """
             CREATE TABLE IF NOT EXISTS users (
                 username text,
@@ -158,16 +183,20 @@ class DatabaseManagerSingleton:
         rows = self.session.execute(query, (title,))
         return rows._current_rows   
     # POTENTIAL CONCURRENT ISSUE
+    # TODO: LWT
     def add_user(self, username):
-        if self.check_username_exists(username):
-            print("Username already exists. Please choose a different username.")
-            return
         query = SimpleStatement("""
             INSERT INTO users (username, reserved_books)
             VALUES (%s, 0)
+            IF NOT EXISTS
         """)
-        self.session.execute(query, (username,))
-        print("User added successfully!")   
+        result = self.session.execute(query, (username,))
+        if result.one().applied:
+            print("User added successfully!")
+            return True
+        else:
+            print("Username already exists. Please choose a different username.")
+            return False   
     # which consisteny level to use?
     # POTENTIAL CONCURRENT ISSUE
     # SOMETIMES DOES NOT DETECT USER
@@ -212,8 +241,7 @@ class DatabaseManagerSingleton:
         query_result = self.session.execute(query, (book_id, title))
         if not query_result.one().applied:
             raise Exception("Failed to release lock on book. You shouldn't be seeing this message!")
-        return True
-    
+        return True   
     def make_reservation(self, username, book_title, book_id, due_date_str):
         if not self.check_username_exists(username):
             print("User does not exist. Cannot make reservation.")
@@ -457,7 +485,7 @@ if __name__ == "__main__":
     port = 9042
     keyspace_name = 'library_project'
     db_manager = DatabaseManagerSingleton(contact_points, port, keyspace_name)
-    #unittest.main()
+    unittest.main()
     main()
     
 """
