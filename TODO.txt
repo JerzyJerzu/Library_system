@@ -4,3 +4,4 @@
 4. handling stress tests
 5. add a dalays as a part of batch statements for making a reservation
 6. try different connect points
+7. Add logging
