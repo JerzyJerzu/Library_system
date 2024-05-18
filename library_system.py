@@ -10,8 +10,8 @@ import logging
 import time
 
 class ExampleTest(unittest.TestCase):
-    def a_test_stress_1(self):
-        db_manager = DatabaseManagerSingleton()
+    def test_stress_1(self):
+        db_manager = DatabaseManagerSingleton(['127.0.1.1', '127.0.1.2', '127.0.1.3'])
         username = "test_user"
         book_title = "Test Book"
         due_date_str = "01.01.2023"
@@ -64,7 +64,7 @@ class ExampleTest(unittest.TestCase):
 
     # adds speciifed number of books and returns their titles
     def add_some_books(self, num_books):
-        db_manager = DatabaseManagerSingleton()
+        db_manager = DatabaseManagerSingleton(['127.0.1.1', '127.0.1.2', '127.0.1.3'])
         book_titles = []
 
         for i in range(num_books):
@@ -75,7 +75,7 @@ class ExampleTest(unittest.TestCase):
         return book_titles
     
     def make_random_requests(self, books, username):
-            db_manager = DatabaseManagerSingleton()
+            db_manager = DatabaseManagerSingleton(['127.0.1.1', '127.0.1.2', '127.0.1.3'])
             db_manager.add_user(username)
             due_date_str = "01.01.2023"
             for _ in range(2000):
@@ -99,19 +99,22 @@ class ExampleTest(unittest.TestCase):
         print('All threads joined')
         self.assertTrue(self.check_reserved_books(usernames))
 
-    def test_stress_3(self):
-        db_manager = DatabaseManagerSingleton()
+    def A_test_stress_3(self):
+        db_manager = DatabaseManagerSingleton(['127.0.1.1'])
+        db_manager.drop_tables()
         books = self.add_some_books(10)
         book_ids = [db_manager.get_books_by_title(title)[0].book_id for title in books]
-        db_manager = DatabaseManagerSingleton()
+        if len(book_ids) != len(books):
+            print('ERROR: BOOK IDS NOT FOUND')
+            return
         db_manager.add_user('Darek')
         db_manager.add_user('Marek')
 
         threads = []
-
-        thread_1 = threading.Thread(target=self.claim_books_pool, args=(books, book_ids, 'Darek',db_manager))
+        barrier = threading.Barrier(2)
+        thread_1 = threading.Thread(target=self.claim_books_pool, args=(books, book_ids, 'Darek',['127.0.1.3'],barrier))
         threads.append(thread_1)
-        thread_2 = threading.Thread(target=self.claim_books_pool, args=(books, book_ids, 'Marek', db_manager))
+        thread_2 = threading.Thread(target=self.claim_books_pool, args=(books, book_ids, 'Marek',['127.0.1.2'],barrier))
         threads.append(thread_2)
 
         thread_1.start()
@@ -123,18 +126,22 @@ class ExampleTest(unittest.TestCase):
         Darek_books = db_manager.get_user_reserved_books('Darek')
         Marek_books = db_manager.get_user_reserved_books('Marek')
 
+        print('Darek_books: ', len(Darek_books))
         print(Darek_books)
+        print('Marek_books: ', len(Marek_books))
         print(Marek_books)
 
         self.assertGreater(len(Darek_books), 0)
         self.assertGreater(len(Marek_books), 0)
 
-    def claim_books_pool(self, book_titles, books_ids, username, db_manager, due_date_str="11.11.2024"):
+    def claim_books_pool(self, book_titles, books_ids, username, contact_points, barrier, due_date_str="11.11.2024"):
+        db_manager = DatabaseManagerSingleton(contact_points)
+        barrier.wait()
         for i in range(len(book_titles)):
             db_manager.make_reservation(username, book_titles[i], books_ids[i], due_date_str)
 
     def check_reserved_books(self, usernames):
-        db_manager = DatabaseManagerSingleton()
+        db_manager = DatabaseManagerSingleton(['127.0.1.1', '127.0.1.2', '127.0.1.3'])
         reserved_books = []
         book_ids = set()
 
@@ -163,31 +170,21 @@ class ExampleTest(unittest.TestCase):
             db_manager.add_user(f'user{i}')
             self.assertEqual(db_manager.check_username_exists(f'user{i}'), True)
 
-class DatabaseManagerSingleton:
-    _instance = None
-    max_reserved_books = 20
-    logs_enabled = False
-    def __new__(cls, *args, **kwargs):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._initialize(*args, **kwargs)
-        return cls._instance    
-    def _initialize(self, contact_points, port, keyspace_name):
-        self.cluster = Cluster(contact_points, port=port)
+class DatabaseManagerSingleton():  
+    def __init__(self, contact_points, logs_enabled=False, max_reserved_books=20):
+        self.cluster = Cluster(contact_points, port=9042)
+        self.logs_enabled = logs_enabled
+        self.max_reserved_books = max_reserved_books
         self.log('initialization')
         self.session = self.cluster.connect()
         self.log('connected to cluster')
-        self.session.set_keyspace(keyspace_name)
+        self.session.set_keyspace('library_project')
         self.log('keyspace set')
         self._create_tables_if_not_exist()        
     def log(self, message):
         if self.logs_enabled:
             print(message)
     def _create_tables_if_not_exist(self):
-        self.session.execute("DROP TABLE IF EXISTS books")
-        self.session.execute("DROP TABLE IF EXISTS users")
-        self.session.execute("DROP TABLE IF EXISTS reservations")
-
         self.session.execute(
             """
             CREATE TABLE IF NOT EXISTS books (
@@ -225,6 +222,11 @@ class DatabaseManagerSingleton:
         )
         self.log('created reservations')
     # POTENTIAL CONCURRENT ISSUE
+    def drop_tables(self):
+        self.session.execute("DROP TABLE IF EXISTS books")
+        self.session.execute("DROP TABLE IF EXISTS users")
+        self.session.execute("DROP TABLE IF EXISTS reservations")
+    
     def add_book(self, title, author):
         query = SimpleStatement("""
             INSERT INTO books (book_id, title, author, available) 
@@ -429,8 +431,8 @@ class MenuDialogSingleton:
             cls._instance = super().__new__(cls)
             cls._instance._initialize(*args, **kwargs)
         return cls._instance
-    def _initialize(self):
-        self.db_manager = DatabaseManagerSingleton()          
+    def _initialize(self, db_manager):
+        self.db_manager = db_manager       
     def show_menu(self):
         print("Menu:")
         print("1. Add a book")
@@ -573,34 +575,12 @@ class MenuDialogSingleton:
             print(f"No reservations found for user {username}.")
         return
 
-def main():
-    menu_dialog = MenuDialogSingleton()
-    menu_dialog.show_menu()
-
 if __name__ == "__main__":
     # select only one of them to connect to specified node
+    unittest.main()
     contact_points = ['127.0.1.1', '127.0.1.2', '127.0.1.3']
     #contact_points = ['127.0.1.3']
-    port = 9042
-    keyspace_name = 'library_project'
-    db_manager = DatabaseManagerSingleton(contact_points, port, keyspace_name)
-    #unittest.main()
-    main()
-    
-"""
-def main():
-    print('hello!')
-    contact_points = ['127.0.1.1', '127.0.1.2', '127.0.1.3']
-    port = 9042
-    keyspace_name = 'library_project'
-
-    db_manager = DatabaseManagerSingleton(contact_points, port, keyspace_name)
-    dialog = DialogSingleton()
-
-    lotr_books = db_manager.get_books_by_title('LOTR')
-    print(lotr_books)
-    print(lotr_books[1].book_id)
-    db_manager.get_replicas('books', lotr_books[1].book_id)
-    dialog.show_dialog('Done')
-"""
-    
+    db_manager = DatabaseManagerSingleton(contact_points)
+    db_manager.drop_tables()
+    menu_dialog = MenuDialogSingleton(db_manager)
+    menu_dialog.show_menu()

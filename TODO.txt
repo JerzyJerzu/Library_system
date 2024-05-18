@@ -1,4 +1,5 @@
-1. int inputs
-2. consistency levels (try with just one replica)
-5. add a dalays as a part of batch statements for making a reservation
-6. try different connect points
+int inputs
+check consistency levels
+add a dalays as a part of batch statements for making a reservation (wokrs fine without it)
+clean code and comments
+split into separate files
