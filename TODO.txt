@@ -1,7 +1,4 @@
 1. int inputs
-2. consistency levels
-3. concurent operations
-4. handling stress tests
+2. consistency levels (try with just one replica)
 5. add a dalays as a part of batch statements for making a reservation
 6. try different connect points
-7. Add logging
