@@ -11,6 +11,7 @@ import time
 
 class ExampleTest(unittest.TestCase):
     def test_stress_1(self):
+        start_time = time.time()
         db_manager = DatabaseManagerSingleton(['127.0.1.1', '127.0.1.2', '127.0.1.3'])
         username = "test_user"
         book_title = "Test Book"
@@ -51,7 +52,7 @@ class ExampleTest(unittest.TestCase):
         for i in range(10000):
             t = threading.Thread(target=make_reservation_thread)
             # user is spamming with the same request every milisecond
-            time.sleep(0.001)
+            time.sleep(0.01)
             threads.append(t)
             #print('thread ', i, ' started')
 
@@ -60,6 +61,8 @@ class ExampleTest(unittest.TestCase):
         for t in threads:
             t.join()
         print('threads joined succesfully')
+        end_time = time.time()  # End time
+        print(f"Test 1 Execution time: {end_time - start_time} seconds")
         self.assertEqual(succesfull_reservations, 1)
 
     # adds speciifed number of books and returns their titles
@@ -84,10 +87,11 @@ class ExampleTest(unittest.TestCase):
                 book_id = books_by_title[0].book_id
                 db_manager.make_reservation(username, book_title, book_id, due_date_str)
     
-    def a_test_stress_2(self):
+    def test_stress_2(self):
         threads = []
         books = self.add_some_books(200)
         usernames = ['Test_user_A', 'Test_user_B', 'Test_user_C', 'Test_user_D', 'Test_user_E']
+        start_time = time.time()
         for username in usernames:
             thread = threading.Thread(target=self.make_random_requests, args=(books, username))
             threads.append(thread)
@@ -97,11 +101,13 @@ class ExampleTest(unittest.TestCase):
             t.join()
 
         print('All threads joined')
+        end_time = time.time()  # End time
+        print(f"Test 1 Execution time: {end_time - start_time} seconds")
         self.assertTrue(self.check_reserved_books(usernames))
 
-    def A_test_stress_3(self):
+    def test_stress_3(self):
         db_manager = DatabaseManagerSingleton(['127.0.1.1'])
-        db_manager.drop_tables()
+        db_manager.reset_tables()
         books = self.add_some_books(10)
         book_ids = [db_manager.get_books_by_title(title)[0].book_id for title in books]
         if len(book_ids) != len(books):
@@ -116,12 +122,15 @@ class ExampleTest(unittest.TestCase):
         threads.append(thread_1)
         thread_2 = threading.Thread(target=self.claim_books_pool, args=(books, book_ids, 'Marek',['127.0.1.2'],barrier))
         threads.append(thread_2)
-
+        start_time = time.time()
         thread_1.start()
         thread_2.start()
 
         for t in threads:
             t.join()
+
+        end_time = time.time()  # End time
+        print(f"Test 1 Execution time: {end_time - start_time} seconds")
 
         Darek_books = db_manager.get_user_reserved_books('Darek')
         Marek_books = db_manager.get_user_reserved_books('Marek')
@@ -151,6 +160,8 @@ class ExampleTest(unittest.TestCase):
             if len(user_reserved_books) > db_manager.max_reserved_books:
                 print('USER RESERVED MORE BOOKS THAN ALLOWED!')
                 return False
+            else:
+                print("user reserved books: ", len(user_reserved_books))
             reserved_books.extend(user_reserved_books)
 
         # Store the book ids in a set to check for uniqueness
@@ -180,11 +191,11 @@ class DatabaseManagerSingleton():
         self.log('connected to cluster')
         self.session.set_keyspace('library_project')
         self.log('keyspace set')
-        self._create_tables_if_not_exist()        
+        self.create_tables_if_not_exist()        
     def log(self, message):
         if self.logs_enabled:
             print(message)
-    def _create_tables_if_not_exist(self):
+    def create_tables_if_not_exist(self):
         self.session.execute(
             """
             CREATE TABLE IF NOT EXISTS books (
@@ -222,10 +233,11 @@ class DatabaseManagerSingleton():
         )
         self.log('created reservations')
     # POTENTIAL CONCURRENT ISSUE
-    def drop_tables(self):
+    def reset_tables(self):
         self.session.execute("DROP TABLE IF EXISTS books")
         self.session.execute("DROP TABLE IF EXISTS users")
         self.session.execute("DROP TABLE IF EXISTS reservations")
+        self.create_tables_if_not_exist()
     
     def add_book(self, title, author):
         query = SimpleStatement("""
@@ -577,10 +589,13 @@ class MenuDialogSingleton:
 
 if __name__ == "__main__":
     # select only one of them to connect to specified node
-    unittest.main()
+    #unittest.main()
+    #print('TESTS FINISHED')
     contact_points = ['127.0.1.1', '127.0.1.2', '127.0.1.3']
     #contact_points = ['127.0.1.3']
     db_manager = DatabaseManagerSingleton(contact_points)
-    db_manager.drop_tables()
+    #print('Database manager initialized')
+    db_manager.reset_tables()
     menu_dialog = MenuDialogSingleton(db_manager)
+    #print('Menu dialog initialized')
     menu_dialog.show_menu()
