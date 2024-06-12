@@ -6,7 +6,6 @@ from cassandra.cluster import Cluster, NoHostAvailable
 from cassandra.metadata import KeyspaceMetadata
 from cassandra.query import SimpleStatement, ConsistencyLevel
 from datetime import datetime, timezone
-import logging
 import time
 
 class ExampleTest(unittest.TestCase):
@@ -15,30 +14,16 @@ class ExampleTest(unittest.TestCase):
         db_manager = DatabaseManagerSingleton(['127.0.1.1', '127.0.1.2', '127.0.1.3'])
         username = "test_user"
         book_title = "Test Book"
-        due_date_str = "01.01.2023"
+        due_date_str = "20.06.2024"
 
-        # Add the book to the database
         db_manager.add_book(book_title, "Test Author")
 
-        # Retrieve the book id by title
         books = db_manager.get_books_by_title(book_title)
         book_id = books[0].book_id
 
-        # Add the user to the database
         db_manager.add_user(username)
         succesfull_reservations = 0
         lock = threading.Lock()
-        """
-        for i in range(10000):
-                #print(i)
-                if db_manager.make_reservation(username, book_title, book_id, due_date_str):
-                    #print('successful_reservation')
-                    with lock:
-                        succesfull_reservations += 1
-                #else:
-                    #print('failed_reservation')
-        # Make multiple reservations quickly
-        """
         def make_reservation_thread():
             nonlocal succesfull_reservations
             for i in range(1):
@@ -51,7 +36,7 @@ class ExampleTest(unittest.TestCase):
         threads = []
         for i in range(10000):
             t = threading.Thread(target=make_reservation_thread)
-            # user is spamming with the same request every milisecond
+            # user is spamming with the same request every 10 miliseconds
             time.sleep(0.01)
             threads.append(t)
             #print('thread ', i, ' started')
@@ -61,7 +46,7 @@ class ExampleTest(unittest.TestCase):
         for t in threads:
             t.join()
         print('threads joined succesfully')
-        end_time = time.time()  # End time
+        end_time = time.time()
         print(f"Test 1 Execution time: {end_time - start_time} seconds")
         self.assertEqual(succesfull_reservations, 1)
 
@@ -101,7 +86,7 @@ class ExampleTest(unittest.TestCase):
             t.join()
 
         print('All threads joined')
-        end_time = time.time()  # End time
+        end_time = time.time()
         print(f"Test 1 Execution time: {end_time - start_time} seconds")
         self.assertTrue(self.check_reserved_books(usernames))
 
@@ -129,7 +114,7 @@ class ExampleTest(unittest.TestCase):
         for t in threads:
             t.join()
 
-        end_time = time.time()  # End time
+        end_time = time.time()
         print(f"Test 1 Execution time: {end_time - start_time} seconds")
 
         Darek_books = db_manager.get_user_reserved_books('Darek')
@@ -164,7 +149,6 @@ class ExampleTest(unittest.TestCase):
                 print("user reserved books: ", len(user_reserved_books))
             reserved_books.extend(user_reserved_books)
 
-        # Store the book ids in a set to check for uniqueness
         book_ids = set()
         for book in reserved_books:
             if book[0].book_id in book_ids:
@@ -219,8 +203,6 @@ class DatabaseManagerSingleton():
         )
         self.log('created users')
         self.session.execute(
-            # POTENTIAL DANGER primary key
-            # ADD due date
             """
             CREATE TABLE IF NOT EXISTS reservations (
             username text,
@@ -232,13 +214,11 @@ class DatabaseManagerSingleton():
             """
         )
         self.log('created reservations')
-    # POTENTIAL CONCURRENT ISSUE
     def reset_tables(self):
         self.session.execute("DROP TABLE IF EXISTS books")
         self.session.execute("DROP TABLE IF EXISTS users")
         self.session.execute("DROP TABLE IF EXISTS reservations")
-        self.create_tables_if_not_exist()
-    
+        self.create_tables_if_not_exist()  
     def add_book(self, title, author):
         query = SimpleStatement("""
             INSERT INTO books (book_id, title, author, available) 
@@ -246,13 +226,10 @@ class DatabaseManagerSingleton():
         """, consistency_level=ConsistencyLevel.TWO)
         self.session.execute(query, (title, author))
         return True
-    # SERIOUS ISSUE: SOMETIMES DOES NOT RETURN ALL ROWS
-    # why did copilot recommend above comment?
     def get_books_by_title(self, title):
         query = SimpleStatement("SELECT * FROM books WHERE title = %s", consistency_level=ConsistencyLevel.ONE)
         rows = self.session.execute(query, (title,))
         return rows._current_rows   
-    # POTENTIAL CONCURRENT ISSUE
     def add_user(self, username):
         query = SimpleStatement("""
             INSERT INTO users (username, reserved_books)
@@ -266,9 +243,6 @@ class DatabaseManagerSingleton():
         else:
             self.log("Username already exists. Please choose a different username.")
             return False   
-    # which consisteny level to use?
-    # POTENTIAL CONCURRENT ISSUE
-    # SOMETIMES DOES NOT DETECT USER
     def check_username_exists(self, username):
         query = SimpleStatement("SELECT * FROM users WHERE username = %s", consistency_level=ConsistencyLevel.TWO)
         self.log('checking username exists')
@@ -278,21 +252,14 @@ class DatabaseManagerSingleton():
             return True
         self.log('user does not exist')
         return False
-    # which consisteny level to use?
-    # POTENTIAL CONCURRENT ISSUE
     def get_book(self, title, book_id):
             query = SimpleStatement("SELECT * FROM books WHERE title = %s AND book_id = %s", consistency_level=ConsistencyLevel.TWO)
             rows = self.session.execute(query, (title, book_id))
             return rows.one()
-    # which consisteny level to use?
-    # POTENTIAL CONCURRENT ISSUE
     def check_user_reserved_books(self, username):
         query = SimpleStatement("SELECT reserved_books FROM users WHERE username = %s", consistency_level=ConsistencyLevel.TWO)
         rows = self.session.execute(query, (username,))
         return rows.one().reserved_books
-    # POTENTIAL CONCURRENT ISSUE
-    # WHY DO I NEED TO SPECIFY ALL CLYSTERING KEY IN QUERY
-        # Rest of the code remains unchanged
     def lock_book(self, book_id, title):
         query = SimpleStatement("""
             UPDATE books
@@ -304,7 +271,6 @@ class DatabaseManagerSingleton():
             query_result = self.session.execute(query, (book_id, title))
         except NoHostAvailable as e:
             print(f"Error occurred: {e}")
-            # handle the exception as needed
             return False
         if not query_result.one().applied:
             self.log("Didn't manage to lock the book")
@@ -351,7 +317,6 @@ class DatabaseManagerSingleton():
         #time.sleep(0.2)
         self.log("Reservation made successfully!")
         return True  
-    # POTENTIAL CONCURRENT ISSUE
     def get_user_reserved_books(self, username):
         query = SimpleStatement("""
                 SELECT book_title, book_id, due_date
@@ -404,8 +369,6 @@ class DatabaseManagerSingleton():
         
         print("Reservation finished!")
         return True
-    # which consisteny level to use?
-    # POTENTIAL CONCURRENT ISSUE
     def increment_user_reserved_books(self, username):
         query = SimpleStatement("UPDATE users SET reserved_books = reserved_books + 1 WHERE username = %s IF reserved_books < %s", consistency_level=ConsistencyLevel.TWO)
         result = self.session.execute(query, (username, self.max_reserved_books))
@@ -500,7 +463,7 @@ class MenuDialogSingleton:
         if aborting.upper() == "N":
             return
         self.make_reservation_dialog(book_id, book_title)
-    # display also by whom the book is reserved
+    # TODO display also by whom the book is reserved
     def search_book_dialog(self):
         search_term = input("Enter the title of the book: ")
         books = self.db_manager.get_books_by_title(search_term)
@@ -525,7 +488,6 @@ class MenuDialogSingleton:
             book_index = input("Enter the index of the book you wish to reserve, or N to cancel:")
             if book_index.upper() == "N":
                 return
-            # add test for invalid input
             book_index = int(book_index)
             if book_index < 1 or book_index > len(books):
                 print("Invalid book index. Please try again.")
@@ -568,7 +530,6 @@ class MenuDialogSingleton:
             reservation_index = input("Enter the index of the reservation you wish to select, or N to cancel:")
             if reservation_index.upper() == "N":
                 return
-            # add test for invalid input
             reservation_index = int(reservation_index)
             if reservation_index < 1 or reservation_index > len(reservations):
                 print("Invalid reservation index. Please try again.")
@@ -588,7 +549,6 @@ class MenuDialogSingleton:
         return
 
 if __name__ == "__main__":
-    # select only one of them to connect to specified node
     #unittest.main()
     #print('TESTS FINISHED')
     contact_points = ['127.0.1.1', '127.0.1.2', '127.0.1.3']
