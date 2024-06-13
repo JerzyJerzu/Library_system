@@ -549,7 +549,7 @@ class MenuDialogSingleton:
         return
 
 if __name__ == "__main__":
-    #unittest.main()
+    unittest.main()
     #print('TESTS FINISHED')
     contact_points = ['127.0.1.1', '127.0.1.2', '127.0.1.3']
     #contact_points = ['127.0.1.3']
